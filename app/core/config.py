@@ -1,5 +1,6 @@
-from typing import List, Optional, Union
-from pydantic import AnyHttpUrl, EmailStr, validator
+"""Application configuration."""
+from typing import Any, Dict, List, Optional, Union
+from pydantic import AnyHttpUrl, EmailStr, PostgresDsn, validator
 from pydantic_settings import BaseSettings
 import secrets
 
@@ -13,15 +14,22 @@ class Settings(BaseSettings):
     
     # Project Info
     PROJECT_NAME: str = "HIV Program Activities Tracker"
-    VERSION: str = "1.0.0"
+    VERSION: str = "0.1.0"
     ENVIRONMENT: str = "development"
     
     # Database
-    DATABASE_URL: str
+    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "hiv_program_tracker"
+    DATABASE_URL: Optional[PostgresDsn] = None
     TEST_DATABASE_URL: Optional[str] = None
     
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    
+    # Logging
+    LOG_LEVEL: str = "INFO"
     
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
@@ -39,17 +47,16 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     EMAILS_FROM_EMAIL: Optional[EmailStr] = None
     EMAILS_FROM_NAME: Optional[str] = None
-    
+    EMAIL_TEMPLATES_DIR: str = "app/email-templates/build"
+    EMAIL_RESET_TOKEN_EXPIRE_HOURS: int = 48
+    EMAILS_ENABLED: bool = False
+
     @validator("EMAILS_FROM_NAME")
     def get_project_name(cls, v: Optional[str], values: dict) -> str:
         if not v:
             return values.get("PROJECT_NAME", "HIV Program Tracker")
         return v
-    
-    EMAIL_RESET_TOKEN_EXPIRE_HOURS: int = 48
-    EMAIL_TEMPLATES_DIR: str = "app/email-templates/build"
-    EMAILS_ENABLED: bool = False
-    
+
     @validator("EMAILS_ENABLED", pre=True)
     def get_emails_enabled(cls, v: bool, values: dict) -> bool:
         return bool(
@@ -57,33 +64,23 @@ class Settings(BaseSettings):
             and values.get("SMTP_PORT")
             and values.get("EMAILS_FROM_EMAIL")
         )
-    
-    # Redis
-    REDIS_URL: str = "redis://localhost:6379"
-    
-    # Logging
-    LOG_LEVEL: str = "INFO"
-    
-    # Security
-    BCRYPT_ROUNDS: int = 12
-    
-    # Pagination
-    DEFAULT_PAGE_SIZE: int = 20
-    MAX_PAGE_SIZE: int = 100
-    
-    # File Upload
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
-    ALLOWED_FILE_TYPES: List[str] = [
-        "application/pdf", 
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "image/jpeg",
-        "image/png"
-    ]
-    
+
+    @validator("DATABASE_URL", pre=True)
+    def assemble_db_connection(cls, v: Optional[str], values: Dict[str, Any]) -> Any:
+        if isinstance(v, str):
+            return v
+        return PostgresDsn.build(
+            scheme="postgresql+asyncpg",
+            username=values.get("POSTGRES_USER"),
+            password=values.get("POSTGRES_PASSWORD"),
+            host=values.get("POSTGRES_SERVER"),
+            path=f"/{values.get('POSTGRES_DB') or ''}",
+        )
+
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # This will ignore extra fields
 
 
 # Create settings instance

@@ -5,6 +5,7 @@ from sqlmodel import SQLModel
 import logging
 
 from app.core.config import get_database_url, settings
+from app.models import *
 
 logger = logging.getLogger(__name__)
 
