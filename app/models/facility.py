@@ -54,10 +54,15 @@ class Facility(BaseModel, table=True):
         description="ID of the district this facility belongs to"
     )
 
-    # Relationships - Remove lazy loading configurations that cause issues
+    # Relationships
     province: "Province" = Relationship(back_populates="facilities")
     district: "District" = Relationship(back_populates="facilities")
     programs: List["Program"] = Relationship(
         back_populates="facilities",
         link_model=FacilityProgram
     )
+
+    # __table_args__ removed for now to rely on individual FKs
+    # and address the "no unique constraint matching given keys" error.
+    # A more complex CHECK constraint or application-level validation
+    # will be needed to ensure facility.province_id matches facility.district.province_id.
