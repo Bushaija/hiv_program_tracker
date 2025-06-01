@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# HIV Program Activities Tracker - Cursor AI Rules
+
+## Project Overview Rules
+
+### Project Context
+- **Domain**: Healthcare financial management system for HIV program activities
+- **Architecture**: FastAPI + SQLModel + PostgreSQL + Async patterns
+- **Users**: Healthcare accountants, administrators, program managers
+- **Core Flow**: Planning → Execution → Reporting
+- **Key Entities**: Facilities, Plans, Executions, Users, Geographic hierarchy
+
+### Development Phases
+Follow the 7-phase development approach:
+1. **Foundation Layer** (Weeks 1-2): Database + Core config
+2. **User Management** (Weeks 2-3): Authentication + User system  
+3. **Reference Data** (Weeks 3-4): Geography + Facilities + Programs
+4. **Planning System** (Weeks 4-6): Budget planning + Approval workflow
+5. **Execution System** (Weeks 6-8): Financial execution + Balance tracking
+6. **Reporting** (Weeks 8-9): Automated financial reports
+7. **Supporting Features** (Weeks 9-10): Audit + Notifications + Utilities

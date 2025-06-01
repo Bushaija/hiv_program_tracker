@@ -1,0 +1,432 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+## Database Schema Rules
+
+### Model Patterns
+```python
+# Always extend BaseModel for common fields
+class BaseModel(SQLModel):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+# Use proper table naming and relationships
+class Facility(BaseModel, table=True):
+    __tablename__ = "facilities"
+    
+    name: str = Field(max_length=200)
+    facility_type: str = Field(regex="^(hospital|health_center)$")
+    district_id: int = Field(foreign_key="districts.id")
+    
+    # Relationships
+    district: "District" = Relationship(back_populates="facilities")
+    plans: List["Plan"] = Relationship(back_populates="facility")
+```
+
+### Required Model Features
+- **Primary Keys**: Use `id` for regular tables, `UUID` for sensitive data (users, plans, executions)
+- **Timestamps**: Always include `created_at` and `updated_at`
+- **Constraints**: Add validation constraints (length, regex, choices)
+- **Relationships**: Define both forward and back references
+- **Soft Deletes**: Use `is_active` boolean instead of hard deletes where appropriate
+
+### Foreign Key Patterns
+- **Geographic Hierarchy**: `province_id → district_id → facility_id`
+- **User Context**: Link sensitive operations to `created_by` and `approved_by`
+- **Business Logic**: Plans link to facilities, executions link to plans
+- **Cascading**: Use `ON DELETE RESTRICT` for reference data, `CASCADE` for dependent data
+
+
+-- HIV Program Activities Tracker Database Schema
+-- PostgreSQL 14+
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- =============================================
+-- 1. GEOGRAPHIC & ADMINISTRATIVE STRUCTURE
+-- =============================================
+
+CREATE TABLE provinces (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    code VARCHAR(10) UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE districts (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    code VARCHAR(10),
+    province_id INTEGER NOT NULL REFERENCES provinces(id) ON DELETE RESTRICT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, province_id)
+);
+
+CREATE TABLE facilities (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    facility_type VARCHAR(20) NOT NULL CHECK (facility_type IN ('hospital', 'health_center')),
+    district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE RESTRICT,
+    programs TEXT[] DEFAULT '{}', -- Array of programs: HIV, TB, MALARIA
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, district_id)
+);
+
+-- =============================================
+-- 2. USER MANAGEMENT & AUTHENTICATION
+-- =============================================
+
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    email_verified BOOLEAN DEFAULT false,
+    last_login_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE user_profiles (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    province_id INTEGER NOT NULL REFERENCES provinces(id) ON DELETE RESTRICT,
+    district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE RESTRICT,
+    facility_id INTEGER NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+    role VARCHAR(50) DEFAULT 'accountant',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+
+-- Password reset tokens
+CREATE TABLE password_reset_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    used_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- 3. PROGRAM & FISCAL YEAR MANAGEMENT
+-- =============================================
+
+CREATE TABLE programs (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    code VARCHAR(10) NOT NULL UNIQUE,
+    description TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE fiscal_years (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(20) NOT NULL UNIQUE, -- e.g., "2023-2024"
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CHECK (end_date > start_date)
+);
+
+-- =============================================
+-- 4. ACTIVITY REFERENCE DATA
+-- =============================================
+
+CREATE TABLE activity_categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    code VARCHAR(20) NOT NULL UNIQUE,
+    description TEXT,
+    facility_types TEXT[] DEFAULT '{"hospital", "health_center"}', -- Which facility types this applies to
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE activity_types (
+    id SERIAL PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES activity_categories(id) ON DELETE CASCADE,
+    name VARCHAR(200) NOT NULL,
+    code VARCHAR(50),
+    description TEXT,
+    facility_types TEXT[] DEFAULT '{"hospital", "health_center"}',
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(category_id, name)
+);
+
+-- =============================================
+-- 5. PLANNING SYSTEM
+-- =============================================
+
+CREATE TABLE plans (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    facility_id INTEGER NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+    program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE RESTRICT,
+    fiscal_year_id INTEGER NOT NULL REFERENCES fiscal_years(id) ON DELETE RESTRICT,
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    
+    -- Metadata
+    facility_name VARCHAR(200) NOT NULL,
+    facility_type VARCHAR(20) NOT NULL,
+    district_name VARCHAR(100) NOT NULL,
+    province_name VARCHAR(100) NOT NULL,
+    program_name VARCHAR(100) NOT NULL,
+    period VARCHAR(20) NOT NULL,
+    
+    -- Status and totals
+    status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'approved', 'rejected')),
+    total_budget DECIMAL(15,2) DEFAULT 0,
+    submitted_by VARCHAR(255),
+    submitted_at TIMESTAMP WITH TIME ZONE,
+    approved_by UUID REFERENCES users(id),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Ensure one plan per facility/program/fiscal year
+    UNIQUE(facility_id, program_id, fiscal_year_id)
+);
+
+CREATE TABLE plan_activities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    
+    -- Activity details
+    activity_category VARCHAR(200) NOT NULL,
+    type_of_activity VARCHAR(200) NOT NULL,
+    activity_description TEXT NOT NULL,
+    
+    -- Planning data
+    frequency INTEGER DEFAULT 1,
+    unit_cost DECIMAL(12,2) DEFAULT 0,
+    
+    -- Quarterly counts and amounts
+    count_q1 INTEGER DEFAULT 0,
+    count_q2 INTEGER DEFAULT 0,
+    count_q3 INTEGER DEFAULT 0,
+    count_q4 INTEGER DEFAULT 0,
+    
+    amount_q1 DECIMAL(12,2) DEFAULT 0,
+    amount_q2 DECIMAL(12,2) DEFAULT 0,
+    amount_q3 DECIMAL(12,2) DEFAULT 0,
+    amount_q4 DECIMAL(12,2) DEFAULT 0,
+    
+    total_budget DECIMAL(12,2) GENERATED ALWAYS AS (amount_q1 + amount_q2 + amount_q3 + amount_q4) STORED,
+    
+    comment TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- 6. EXECUTION SYSTEM
+-- =============================================
+
+CREATE TABLE executions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    
+    -- Metadata
+    facility_name VARCHAR(200) NOT NULL,
+    district_name VARCHAR(100) NOT NULL,
+    program_name VARCHAR(200) NOT NULL,
+    reporting_period VARCHAR(50) NOT NULL,
+    fiscal_year VARCHAR(20) NOT NULL,
+    
+    -- Status and balance
+    status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'approved', 'rejected')),
+    is_balanced BOOLEAN DEFAULT false,
+    total_receipts DECIMAL(15,2) DEFAULT 0,
+    total_expenditures DECIMAL(15,2) DEFAULT 0,
+    balance_difference DECIMAL(15,2) GENERATED ALWAYS AS (total_receipts - total_expenditures) STORED,
+    
+    submitted_by VARCHAR(255),
+    submitted_at TIMESTAMP WITH TIME ZONE,
+    approved_by UUID REFERENCES users(id),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    -- One execution per plan
+    UNIQUE(plan_id)
+);
+
+-- Hierarchical financial structure for execution items
+CREATE TABLE execution_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    execution_id UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+    parent_id UUID REFERENCES execution_items(id) ON DELETE CASCADE,
+    
+    -- Item identification
+    item_code VARCHAR(20) NOT NULL, -- e.g., "a", "b01", "b01-1"
+    title VARCHAR(500) NOT NULL,
+    
+    -- Hierarchy and behavior
+    is_category BOOLEAN DEFAULT false,
+    is_editable BOOLEAN DEFAULT true,
+    indent_level INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    
+    -- Financial data
+    cumulative_balance DECIMAL(12,2) DEFAULT 0,
+    q1 DECIMAL(12,2) DEFAULT 0,
+    q2 DECIMAL(12,2) DEFAULT 0,
+    q3 DECIMAL(12,2) DEFAULT 0,
+    q4 DECIMAL(12,2) DEFAULT 0,
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(execution_id, item_code)
+);
+
+-- =============================================
+-- 7. AUDIT TRAIL
+-- =============================================
+
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    table_name VARCHAR(100) NOT NULL,
+    record_id VARCHAR(100) NOT NULL,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+    old_values JSONB,
+    new_values JSONB,
+    changed_by UUID REFERENCES users(id),
+    changed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    ip_address INET,
+    user_agent TEXT
+);
+
+-- =============================================
+-- 8. INDEXES FOR PERFORMANCE
+-- =============================================
+
+-- Geographic hierarchy indexes
+CREATE INDEX idx_districts_province_id ON districts(province_id);
+CREATE INDEX idx_facilities_district_id ON facilities(district_id);
+CREATE INDEX idx_facilities_type ON facilities(facility_type);
+CREATE INDEX idx_facilities_active ON facilities(is_active) WHERE is_active = true;
+
+-- User and profile indexes
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_active ON users(is_active) WHERE is_active = true;
+CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
+CREATE INDEX idx_user_profiles_location ON user_profiles(province_id, district_id, facility_id);
+
+-- Planning system indexes
+CREATE INDEX idx_plans_facility_program_fy ON plans(facility_id, program_id, fiscal_year_id);
+CREATE INDEX idx_plans_status ON plans(status);
+CREATE INDEX idx_plans_created_by ON plans(created_by);
+CREATE INDEX idx_plans_submitted_at ON plans(submitted_at);
+CREATE INDEX idx_plan_activities_plan_id ON plan_activities(plan_id);
+
+-- Execution system indexes
+CREATE INDEX idx_executions_plan_id ON executions(plan_id);
+CREATE INDEX idx_executions_status ON executions(status);
+CREATE INDEX idx_executions_created_by ON executions(created_by);
+CREATE INDEX idx_execution_items_execution_id ON execution_items(execution_id);
+CREATE INDEX idx_execution_items_parent_id ON execution_items(parent_id);
+CREATE INDEX idx_execution_items_hierarchy ON execution_items(execution_id, parent_id, sort_order);
+
+-- Audit indexes
+CREATE INDEX idx_audit_logs_table_record ON audit_logs(table_name, record_id);
+CREATE INDEX idx_audit_logs_changed_by ON audit_logs(changed_by);
+CREATE INDEX idx_audit_logs_changed_at ON audit_logs(changed_at);
+
+-- =============================================
+-- 9. FUNCTIONS AND TRIGGERS
+-- =============================================
+
+-- Update timestamp function
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Apply update triggers to relevant tables
+CREATE TRIGGER update_provinces_updated_at BEFORE UPDATE ON provinces FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_districts_updated_at BEFORE UPDATE ON districts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_facilities_updated_at BEFORE UPDATE ON facilities FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_user_profiles_updated_at BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_programs_updated_at BEFORE UPDATE ON programs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_fiscal_years_updated_at BEFORE UPDATE ON fiscal_years FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_plan_activities_updated_at BEFORE UPDATE ON plan_activities FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_executions_updated_at BEFORE UPDATE ON executions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_execution_items_updated_at BEFORE UPDATE ON execution_items FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Function to update plan total budget when activities change
+CREATE OR REPLACE FUNCTION update_plan_total_budget()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE plans 
+    SET total_budget = (
+        SELECT COALESCE(SUM(total_budget), 0) 
+        FROM plan_activities 
+        WHERE plan_id = COALESCE(NEW.plan_id, OLD.plan_id)
+    )
+    WHERE id = COALESCE(NEW.plan_id, OLD.plan_id);
+    
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ language 'plpgsql';
+
+-- Trigger to update plan totals
+CREATE TRIGGER update_plan_total_on_activity_change
+    AFTER INSERT OR UPDATE OR DELETE ON plan_activities
+    FOR EACH ROW EXECUTE FUNCTION update_plan_total_budget();
+
+-- Function to update execution balance totals
+CREATE OR REPLACE FUNCTION update_execution_totals()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE executions 
+    SET 
+        total_receipts = (
+            SELECT COALESCE(SUM(cumulative_balance), 0) 
+            FROM execution_items 
+            WHERE execution_id = COALESCE(NEW.execution_id, OLD.execution_id)
+            AND item_code LIKE 'a%' 
+            AND is_category = false
+        ),
+        total_expenditures = (
+            SELECT COALESCE(SUM(ABS(cumulative_balance)), 0) 
+            FROM execution_items 
+            WHERE execution_id = COALESCE(NEW.execution_id, OLD.execution_id)
+            AND item_code LIKE 'b%' 
+            AND is_category = false
+        )
+    WHERE id = COALESCE(NEW.execution_id, OLD.execution_id);
+    
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ language 'plpgsql';
+
+-- Trigger to update execution totals
+CREATE TRIGGER update_execution_totals_on_item_change
+    AFTER INSERT OR UPDATE OR DELETE ON execution_items
+    FOR EACH ROW EXECUTE FUNCTION update_execution_totals();

@@ -1,0 +1,568 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# HIV Program Activities Tracker - Cursor AI Rules
+
+## Project Overview Rules
+
+### Project Context
+- **Domain**: Healthcare financial management system for HIV program activities
+- **Architecture**: FastAPI + SQLModel + PostgreSQL + Async patterns
+- **Users**: Healthcare accountants, administrators, program managers
+- **Core Flow**: Planning → Execution → Reporting
+- **Key Entities**: Facilities, Plans, Executions, Users, Geographic hierarchy
+
+### Development Phases
+Follow the 7-phase development approach:
+1. **Foundation Layer** (Weeks 1-2): Database + Core config
+2. **User Management** (Weeks 2-3): Authentication + User system  
+3. **Reference Data** (Weeks 3-4): Geography + Facilities + Programs
+4. **Planning System** (Weeks 4-6): Budget planning + Approval workflow
+5. **Execution System** (Weeks 6-8): Financial execution + Balance tracking
+6. **Reporting** (Weeks 8-9): Automated financial reports
+7. **Supporting Features** (Weeks 9-10): Audit + Notifications + Utilities
+
+---
+
+## Project Structure Rules
+
+### File Organization Standards
+```
+hiv_program_tracker/
+├── app/
+│   ├── core/          # Configuration, database, security, dependencies
+│   ├── models/        # SQLModel database models
+│   ├── schemas/       # Pydantic request/response schemas
+│   ├── crud/          # Database operations
+│   ├── api/v1/        # API endpoints (versioned)
+│   ├── services/      # Business logic layer
+│   └── utils/         # Helper functions, validators, constants
+```
+
+### Naming Conventions
+- **Files**: snake_case (e.g., `user_profile.py`, `planning_service.py`)
+- **Classes**: PascalCase (e.g., `UserProfile`, `PlanningService`)
+- **Functions/Variables**: snake_case (e.g., `create_user`, `facility_id`)
+- **Constants**: UPPER_SNAKE_CASE (e.g., `DEFAULT_PAGE_SIZE`)
+- **Endpoints**: kebab-case in URLs (e.g., `/api/v1/user-profiles`)
+
+### Import Organization
+```python
+# Standard library imports
+from datetime import datetime
+from typing import Optional, List
+
+# Third-party imports
+from fastapi import FastAPI, Depends, HTTPException
+from sqlmodel import SQLModel, Field, Relationship
+
+# Local imports
+from app.core.config import settings
+from app.models.base import BaseModel
+```
+
+---
+
+## Database Schema Rules
+
+### Model Patterns
+```python
+# Always extend BaseModel for common fields
+class BaseModel(SQLModel):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+# Use proper table naming and relationships
+class Facility(BaseModel, table=True):
+    __tablename__ = "facilities"
+    
+    name: str = Field(max_length=200)
+    facility_type: str = Field(regex="^(hospital|health_center)$")
+    district_id: int = Field(foreign_key="districts.id")
+    
+    # Relationships
+    district: "District" = Relationship(back_populates="facilities")
+    plans: List["Plan"] = Relationship(back_populates="facility")
+```
+
+### Required Model Features
+- **Primary Keys**: Use `id` for regular tables, `UUID` for sensitive data (users, plans, executions)
+- **Timestamps**: Always include `created_at` and `updated_at`
+- **Constraints**: Add validation constraints (length, regex, choices)
+- **Relationships**: Define both forward and back references
+- **Soft Deletes**: Use `is_active` boolean instead of hard deletes where appropriate
+
+### Foreign Key Patterns
+- **Geographic Hierarchy**: `province_id → district_id → facility_id`
+- **User Context**: Link sensitive operations to `created_by` and `approved_by`
+- **Business Logic**: Plans link to facilities, executions link to plans
+- **Cascading**: Use `ON DELETE RESTRICT` for reference data, `CASCADE` for dependent data
+
+---
+
+## API Design & Implementation Workflow Rules
+
+### Development Order (Critical)
+For each feature, always follow this exact sequence:
+1. **Models** → 2. **Schemas** → 3. **CRUD** → 4. **API Endpoints** → 5. **Services**
+
+### Endpoint Structure Patterns
+```python
+# Standard CRUD endpoint pattern
+@router.get("/", response_model=List[schemas.FacilityRead])
+async def list_facilities(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    facilities = await crud.facility.get_multi(db, skip=skip, limit=limit)
+    return facilities
+
+@router.post("/", response_model=schemas.FacilityRead, status_code=201)
+async def create_facility(
+    facility_in: schemas.FacilityCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    facility = await crud.facility.create(db, obj_in=facility_in)
+    return facility
+```
+
+### HTTP Status Code Standards
+- **200**: Successful GET, PUT, PATCH
+- **201**: Successful POST (resource created)
+- **204**: Successful DELETE
+- **400**: Validation errors, business logic errors
+- **401**: Authentication required
+- **403**: Insufficient permissions
+- **404**: Resource not found
+- **409**: Conflict (duplicate, business rule violation)
+- **422**: Request validation failed
+
+### Error Handling Patterns
+```python
+# Always use specific HTTP exceptions
+from fastapi import HTTPException, status
+
+# Not found pattern
+if not facility:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Facility not found"
+    )
+
+# Business logic validation
+if plan.status == "approved":
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Cannot modify approved plan"
+    )
+```
+
+---
+
+## Feature-Specific Rules
+
+### 1. User Management & Authentication Rules
+
+#### User Model Requirements
+```python
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+    
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    email: str = Field(unique=True, max_length=255)
+    password_hash: str = Field(max_length=255)
+    is_active: bool = Field(default=True)
+    email_verified: bool = Field(default=False)
+    
+    # Always link to user profile for facility access
+    profile: Optional["UserProfile"] = Relationship(back_populates="user")
+```
+
+#### Authentication Patterns
+```python
+# JWT token creation
+def create_access_token(subject: str, expires_delta: timedelta = None):
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode = {"exp": expire, "sub": str(subject)}
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Current user dependency
+async def get_current_user(
+    db: AsyncSession = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+) -> User:
+    # JWT validation and user lookup logic
+```
+
+#### User Profile Access Control
+- Every user MUST have a profile linking to facility
+- API endpoints filter data based on user's facility access
+- Administrative functions require role-based checking
+
+### 2. Geographic & Facility Management Rules
+
+#### Hierarchy Validation
+```python
+# Always validate geographic hierarchy
+async def validate_facility_hierarchy(
+    facility_data: schemas.FacilityCreate,
+    db: AsyncSession
+):
+    district = await crud.district.get(db, id=facility_data.district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+    
+    # Validate province relationship
+    province = await crud.province.get(db, id=district.province_id)
+    if not province:
+        raise HTTPException(status_code=400, detail="Invalid district-province relationship")
+```
+
+#### Facility Type Patterns
+- **Hospital**: Complex planning forms, all activity categories
+- **Health Center**: Simplified forms, restricted activity types
+- **Programs**: Array field storing `["HIV", "TB", "MALARIA"]`
+- **Validation**: Ensure facility supports requested program
+
+### 3. Planning System Rules
+
+#### Plan Model Patterns
+```python
+class Plan(BaseModel, table=True):
+    __tablename__ = "plans"
+    
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    facility_id: int = Field(foreign_key="facilities.id")
+    program_id: int = Field(foreign_key="programs.id")
+    fiscal_year_id: int = Field(foreign_key="fiscal_years.id")
+    
+    # Metadata (denormalized for reporting)
+    facility_name: str
+    facility_type: str
+    district_name: str
+    province_name: str
+    
+    # Status workflow
+    status: str = Field(default="draft", regex="^(draft|submitted|approved|rejected)$")
+    total_budget: Decimal = Field(default=0, decimal_places=2)
+    
+    # Approval tracking
+    submitted_by: Optional[str]
+    submitted_at: Optional[datetime]
+    approved_by: Optional[UUID] = Field(foreign_key="users.id")
+    approved_at: Optional[datetime]
+```
+
+#### Planning Business Rules
+- **One plan per facility/program/fiscal year** (unique constraint)
+- **Quarterly structure** (Q1, Q2, Q3, Q4) for all activities
+- **Automatic totals** via database triggers
+- **Status workflow**: draft → submitted → approved/rejected
+- **Metadata denormalization** for efficient reporting
+
+#### Plan Activity Calculations
+```python
+# Always use generated columns for totals
+total_budget: Decimal = Field(
+    sa_column=Column(
+        Numeric(12, 2),
+        Computed("amount_q1 + amount_q2 + amount_q3 + amount_q4")
+    )
+)
+```
+
+### 4. Execution System Rules
+
+#### Execution-Plan Relationship
+```python
+# Executions are always based on approved plans
+class Execution(BaseModel, table=True):
+    plan_id: UUID = Field(foreign_key="plans.id", unique=True)  # One execution per plan
+    
+    # Balance validation
+    is_balanced: bool = Field(default=False)
+    total_receipts: Decimal = Field(default=0)
+    total_expenditures: Decimal = Field(default=0)
+    balance_difference: Decimal  # Computed: receipts - expenditures
+```
+
+#### Hierarchical Financial Structure
+```python
+class ExecutionItem(BaseModel, table=True):
+    execution_id: UUID = Field(foreign_key="executions.id")
+    parent_id: Optional[UUID] = Field(foreign_key="execution_items.id")
+    
+    item_code: str  # "a", "b01", "b01-1" (hierarchical coding)
+    title: str
+    is_category: bool = Field(default=False)  # Categories vs line items
+    indent_level: int = Field(default=0)      # Display hierarchy
+    
+    # Financial data
+    cumulative_balance: Decimal = Field(default=0)
+    q1: Decimal = Field(default=0)
+    q2: Decimal = Field(default=0)
+    q3: Decimal = Field(default=0)
+    q4: Decimal = Field(default=0)
+```
+
+#### Balance Validation Rules
+- **Receipts**: Items with codes starting with "a" (positive values)
+- **Expenditures**: Items with codes starting with "b" (negative values)
+- **Assets**: Items with codes starting with "c"
+- **Liabilities**: Items with codes starting with "d"
+- **Balance Check**: Total receipts must equal total expenditures
+
+### 5. Reporting System Rules
+
+#### Report Generation Patterns
+```python
+# Standard report service pattern
+class ReportingService:
+    async def generate_financial_statement(
+        self,
+        db: AsyncSession,
+        execution_id: UUID,
+        report_type: str
+    ) -> Dict[str, Any]:
+        execution = await self.get_execution_with_items(db, execution_id)
+        
+        match report_type:
+            case "revenue_expenditure":
+                return self._generate_revenue_expenditure_statement(execution)
+            case "balance_sheet":
+                return self._generate_balance_sheet(execution)
+            case "cash_flow":
+                return self._generate_cash_flow_statement(execution)
+            case _:
+                raise ValueError(f"Unknown report type: {report_type}")
+```
+
+#### Required Financial Reports
+1. **Revenue & Expenditure Statement** - Income vs expenses by quarter
+2. **Balance Sheet** - Assets, liabilities, and equity position
+3. **Cash Flow Statement** - Operating, investing, financing activities
+4. **Changes in Net Assets** - Equity changes over time
+5. **Budget vs Actual** - Variance analysis between planned and actual
+
+### 6. Authentication & Authorization Rules
+
+#### Security Patterns
+```python
+# Always hash passwords
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+# JWT token validation
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    # Validation logic...
+```
+
+#### Access Control Patterns
+```python
+# Facility-based access control
+async def get_current_user_facilities(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> List[int]:
+    if not current_user.profile:
+        raise HTTPException(status_code=403, detail="User profile required")
+    
+    # Return facilities user can access
+    return [current_user.profile.facility_id]
+
+# Role-based permissions
+def require_role(required_role: str):
+    def role_checker(current_user: User = Depends(get_current_user)):
+        if not current_user.profile or current_user.profile.role != required_role:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return current_user
+    return role_checker
+```
+
+---
+
+## Technical Standards
+
+### Async/Await Patterns
+```python
+# Always use async for database operations
+async def create_plan(
+    db: AsyncSession,
+    plan_in: schemas.PlanCreate,
+    current_user: User
+) -> Plan:
+    db_plan = Plan(**plan_in.dict(), created_by=current_user.id)
+    db.add(db_plan)
+    await db.commit()
+    await db.refresh(db_plan)
+    return db_plan
+
+# Use async context managers
+async with AsyncSession(engine) as session:
+    async with session.begin():
+        # Transaction operations
+        pass
+```
+
+### CRUD Base Class Pattern
+```python
+class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
+    def __init__(self, model: Type[ModelType]):
+        self.model = model
+
+    async def get(self, db: AsyncSession, id: Any) -> Optional[ModelType]:
+        result = await db.execute(select(self.model).where(self.model.id == id))
+        return result.scalar_one_or_none()
+
+    async def get_multi(
+        self, db: AsyncSession, *, skip: int = 0, limit: int = 100
+    ) -> List[ModelType]:
+        result = await db.execute(
+            select(self.model).offset(skip).limit(limit)
+        )
+        return result.scalars().all()
+```
+
+### Error Handling Standards
+```python
+# Custom exceptions for business logic
+class PlanningError(Exception):
+    """Base exception for planning operations"""
+    pass
+
+class PlanAlreadySubmittedException(PlanningError):
+    """Raised when trying to modify a submitted plan"""
+    pass
+
+# HTTP exception mapping
+try:
+    await service.submit_plan(plan_id)
+except PlanAlreadySubmittedException:
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Plan has already been submitted"
+    )
+```
+
+### Database Relationship Management
+```python
+# Always define bidirectional relationships
+class District(BaseModel, table=True):
+    province_id: int = Field(foreign_key="provinces.id")
+    
+    # Forward relationship
+    province: "Province" = Relationship(back_populates="districts")
+    # Back relationship
+    facilities: List["Facility"] = Relationship(back_populates="district")
+
+class Province(BaseModel, table=True):
+    # Back relationship
+    districts: List["District"] = Relationship(back_populates="province")
+```
+
+### Validation Patterns
+```python
+# Use Pydantic validators for complex business logic
+class PlanCreate(BaseModel):
+    facility_id: int
+    program_id: int
+    fiscal_year_id: int
+    
+    @validator('facility_id')
+    def validate_facility_exists(cls, v, values):
+        # Custom validation logic
+        return v
+    
+    @root_validator
+    def validate_unique_plan(cls, values):
+        # Cross-field validation
+        return values
+```
+
+---
+
+## Code Quality Standards
+
+### Documentation Requirements
+- **Models**: Docstrings explaining business purpose
+- **API Endpoints**: Clear parameter descriptions
+- **Complex Functions**: Type hints and docstrings
+- **Business Logic**: Comments explaining domain rules
+
+### Testing Patterns
+```python
+# Test structure for each endpoint
+async def test_create_plan_success(async_client, db_session, test_user):
+    """Test successful plan creation"""
+    plan_data = {
+        "facility_id": 1,
+        "program_id": 1,
+        "fiscal_year_id": 1
+    }
+    
+    response = await async_client.post("/api/v1/plans/", json=plan_data)
+    assert response.status_code == 201
+    assert response.json()["facility_id"] == 1
+
+async def test_create_plan_duplicate_fails(async_client, db_session):
+    """Test duplicate plan creation fails"""
+    # Test business logic validation
+```
+
+### Performance Considerations
+- **Pagination**: Always implement for list endpoints
+- **Eager Loading**: Use `selectinload()` for relationships
+- **Indexing**: Ensure proper database indexes
+- **Caching**: Consider Redis for frequently accessed reference data
+
+---
+
+## Development Workflow
+
+### Git Patterns
+- **Branch naming**: `feature/user-authentication`, `fix/plan-validation`
+- **Commit messages**: `feat: add user profile creation`, `fix: resolve plan total calculation`
+- **Pull requests**: Include phase number and feature description
+
+### Testing Requirements
+- **Unit tests** for CRUD operations
+- **Integration tests** for API endpoints  
+- **Business logic tests** for complex workflows
+- **Database tests** for model relationships
+
+### Environment Configuration
+```python
+# Settings pattern using Pydantic
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "HIV Program Activities Tracker"
+    VERSION: str = "1.0.0"
+    API_V1_STR: str = "/api/v1"
+    
+    DATABASE_URL: str
+    SECRET_KEY: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+```
+
+These rules ensure consistency, maintainability, and adherence to healthcare financial management domain requirements throughout the development process.

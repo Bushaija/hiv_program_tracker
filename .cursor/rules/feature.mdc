@@ -1,0 +1,236 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+## Feature-Specific Rules
+
+### 1. User Management & Authentication Rules
+
+#### User Model Requirements
+```python
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+    
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    email: str = Field(unique=True, max_length=255)
+    password_hash: str = Field(max_length=255)
+    is_active: bool = Field(default=True)
+    email_verified: bool = Field(default=False)
+    
+    # Always link to user profile for facility access
+    profile: Optional["UserProfile"] = Relationship(back_populates="user")
+```
+
+#### Authentication Patterns
+```python
+# JWT token creation
+def create_access_token(subject: str, expires_delta: timedelta = None):
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode = {"exp": expire, "sub": str(subject)}
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Current user dependency
+async def get_current_user(
+    db: AsyncSession = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+) -> User:
+    # JWT validation and user lookup logic
+```
+
+#### User Profile Access Control
+- Every user MUST have a profile linking to facility
+- API endpoints filter data based on user's facility access
+- Administrative functions require role-based checking
+
+### 2. Geographic & Facility Management Rules
+
+#### Hierarchy Validation
+```python
+# Always validate geographic hierarchy
+async def validate_facility_hierarchy(
+    facility_data: schemas.FacilityCreate,
+    db: AsyncSession
+):
+    district = await crud.district.get(db, id=facility_data.district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+    
+    # Validate province relationship
+    province = await crud.province.get(db, id=district.province_id)
+    if not province:
+        raise HTTPException(status_code=400, detail="Invalid district-province relationship")
+```
+
+#### Facility Type Patterns
+- **Hospital**: Complex planning forms, all activity categories
+- **Health Center**: Simplified forms, restricted activity types
+- **Programs**: Array field storing `["HIV", "TB", "MALARIA"]`
+- **Validation**: Ensure facility supports requested program
+
+### 3. Planning System Rules
+
+#### Plan Model Patterns
+```python
+class Plan(BaseModel, table=True):
+    __tablename__ = "plans"
+    
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    facility_id: int = Field(foreign_key="facilities.id")
+    program_id: int = Field(foreign_key="programs.id")
+    fiscal_year_id: int = Field(foreign_key="fiscal_years.id")
+    
+    # Metadata (denormalized for reporting)
+    facility_name: str
+    facility_type: str
+    district_name: str
+    province_name: str
+    
+    # Status workflow
+    status: str = Field(default="draft", regex="^(draft|submitted|approved|rejected)$")
+    total_budget: Decimal = Field(default=0, decimal_places=2)
+    
+    # Approval tracking
+    submitted_by: Optional[str]
+    submitted_at: Optional[datetime]
+    approved_by: Optional[UUID] = Field(foreign_key="users.id")
+    approved_at: Optional[datetime]
+```
+
+#### Planning Business Rules
+- **One plan per facility/program/fiscal year** (unique constraint)
+- **Quarterly structure** (Q1, Q2, Q3, Q4) for all activities
+- **Automatic totals** via database triggers
+- **Status workflow**: draft → submitted → approved/rejected
+- **Metadata denormalization** for efficient reporting
+
+#### Plan Activity Calculations
+```python
+# Always use generated columns for totals
+total_budget: Decimal = Field(
+    sa_column=Column(
+        Numeric(12, 2),
+        Computed("amount_q1 + amount_q2 + amount_q3 + amount_q4")
+    )
+)
+```
+
+### 4. Execution System Rules
+
+#### Execution-Plan Relationship
+```python
+# Executions are always based on approved plans
+class Execution(BaseModel, table=True):
+    plan_id: UUID = Field(foreign_key="plans.id", unique=True)  # One execution per plan
+    
+    # Balance validation
+    is_balanced: bool = Field(default=False)
+    total_receipts: Decimal = Field(default=0)
+    total_expenditures: Decimal = Field(default=0)
+    balance_difference: Decimal  # Computed: receipts - expenditures
+```
+
+#### Hierarchical Financial Structure
+```python
+class ExecutionItem(BaseModel, table=True):
+    execution_id: UUID = Field(foreign_key="executions.id")
+    parent_id: Optional[UUID] = Field(foreign_key="execution_items.id")
+    
+    item_code: str  # "a", "b01", "b01-1" (hierarchical coding)
+    title: str
+    is_category: bool = Field(default=False)  # Categories vs line items
+    indent_level: int = Field(default=0)      # Display hierarchy
+    
+    # Financial data
+    cumulative_balance: Decimal = Field(default=0)
+    q1: Decimal = Field(default=0)
+    q2: Decimal = Field(default=0)
+    q3: Decimal = Field(default=0)
+    q4: Decimal = Field(default=0)
+```
+
+#### Balance Validation Rules
+- **Receipts**: Items with codes starting with "a" (positive values)
+- **Expenditures**: Items with codes starting with "b" (negative values)
+- **Assets**: Items with codes starting with "c"
+- **Liabilities**: Items with codes starting with "d"
+- **Balance Check**: Total receipts must equal total expenditures
+
+### 5. Reporting System Rules
+
+#### Report Generation Patterns
+```python
+# Standard report service pattern
+class ReportingService:
+    async def generate_financial_statement(
+        self,
+        db: AsyncSession,
+        execution_id: UUID,
+        report_type: str
+    ) -> Dict[str, Any]:
+        execution = await self.get_execution_with_items(db, execution_id)
+        
+        match report_type:
+            case "revenue_expenditure":
+                return self._generate_revenue_expenditure_statement(execution)
+            case "balance_sheet":
+                return self._generate_balance_sheet(execution)
+            case "cash_flow":
+                return self._generate_cash_flow_statement(execution)
+            case _:
+                raise ValueError(f"Unknown report type: {report_type}")
+```
+
+#### Required Financial Reports
+1. **Revenue & Expenditure Statement** - Income vs expenses by quarter
+2. **Balance Sheet** - Assets, liabilities, and equity position
+3. **Cash Flow Statement** - Operating, investing, financing activities
+4. **Changes in Net Assets** - Equity changes over time
+5. **Budget vs Actual** - Variance analysis between planned and actual
+
+### 6. Authentication & Authorization Rules
+
+#### Security Patterns
+```python
+# Always hash passwords
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+# JWT token validation
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    # Validation logic...
+```
+
+#### Access Control Patterns
+```python
+# Facility-based access control
+async def get_current_user_facilities(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> List[int]:
+    if not current_user.profile:
+        raise HTTPException(status_code=403, detail="User profile required")
+    
+    # Return facilities user can access
+    return [current_user.profile.facility_id]
+
+# Role-based permissions
+def require_role(required_role: str):
+    def role_checker(current_user: User = Depends(get_current_user)):
+        if not current_user.profile or current_user.profile.role != required_role:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return current_user
+    return role_checker
+```
+

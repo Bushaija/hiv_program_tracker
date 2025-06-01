@@ -1,0 +1,64 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+## API Design & Implementation Workflow Rules
+
+### Development Order (Critical)
+For each feature, always follow this exact sequence:
+1. **Models** → 2. **Schemas** → 3. **CRUD** → 4. **API Endpoints** → 5. **Services**
+
+### Endpoint Structure Patterns
+```python
+# Standard CRUD endpoint pattern
+@router.get("/", response_model=List[schemas.FacilityRead])
+async def list_facilities(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    facilities = await crud.facility.get_multi(db, skip=skip, limit=limit)
+    return facilities
+
+@router.post("/", response_model=schemas.FacilityRead, status_code=201)
+async def create_facility(
+    facility_in: schemas.FacilityCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    facility = await crud.facility.create(db, obj_in=facility_in)
+    return facility
+```
+
+### HTTP Status Code Standards
+- **200**: Successful GET, PUT, PATCH
+- **201**: Successful POST (resource created)
+- **204**: Successful DELETE
+- **400**: Validation errors, business logic errors
+- **401**: Authentication required
+- **403**: Insufficient permissions
+- **404**: Resource not found
+- **409**: Conflict (duplicate, business rule violation)
+- **422**: Request validation failed
+
+### Error Handling Patterns
+```python
+# Always use specific HTTP exceptions
+from fastapi import HTTPException, status
+
+# Not found pattern
+if not facility:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Facility not found"
+    )
+
+# Business logic validation
+if plan.status == "approved":
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Cannot modify approved plan"
+    )
+```

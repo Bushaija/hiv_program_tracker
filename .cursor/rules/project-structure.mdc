@@ -1,0 +1,126 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+## Project Structure Rules
+
+### File Organization Standards
+```
+hiv_program_tracker/
+├── .env.example
+├── .gitignore
+├── README.md
+├── requirements.txt
+├── docker-compose.yml
+├── Dockerfile
+├── alembic.ini
+├── main.py
+├── app/
+│   ├── __init__.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── security.py
+│   │   ├── deps.py
+│   │   └── exceptions.py
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── user.py
+│   │   ├── geography.py
+│   │   ├── facility.py
+│   │   ├── program.py
+│   │   ├── planning.py
+│   │   ├── execution.py
+│   │   └── audit.py
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── user.py
+│   │   ├── geography.py
+│   │   ├── facility.py
+│   │   ├── program.py
+│   │   ├── planning.py
+│   │   ├── execution.py
+│   │   ├── auth.py
+│   │   └── reports.py
+│   ├── crud/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── user.py
+│   │   ├── geography.py
+│   │   ├── facility.py
+│   │   ├── program.py
+│   │   ├── planning.py
+│   │   ├── execution.py
+│   │   └── reports.py
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── deps.py
+│   │   └── v1/
+│   │       ├── __init__.py
+│   │       ├── api.py
+│   │       └── endpoints/
+│   │           ├── __init__.py
+│   │           ├── auth.py
+│   │           ├── users.py
+│   │           ├── geography.py
+│   │           ├── facilities.py
+│   │           ├── programs.py
+│   │           ├── planning.py
+│   │           ├── execution.py
+│   │           └── reports.py
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── auth_service.py
+│   │   ├── email_service.py
+│   │   ├── planning_service.py
+│   │   ├── execution_service.py
+│   │   ├── reporting_service.py
+│   │   └── audit_service.py
+│   └── utils/
+│       ├── __init__.py
+│       ├── helpers.py
+│       ├── validators.py
+│       └── constants.py
+├── alembic/
+│   ├── versions/
+│   ├── env.py
+│   ├── script.py.mako
+│   └── README
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── test_auth.py
+│   ├── test_planning.py
+│   ├── test_execution.py
+│   └── test_reports.py
+└── scripts/
+    ├── init_db.py
+    ├── seed_data.py
+    └── backup_db.py
+```
+
+### Naming Conventions
+- **Files**: snake_case (e.g., `user_profile.py`, `planning_service.py`)
+- **Classes**: PascalCase (e.g., `UserProfile`, `PlanningService`)
+- **Functions/Variables**: snake_case (e.g., `create_user`, `facility_id`)
+- **Constants**: UPPER_SNAKE_CASE (e.g., `DEFAULT_PAGE_SIZE`)
+- **Endpoints**: kebab-case in URLs (e.g., `/api/v1/user-profiles`)
+
+### Import Organization
+```python
+# Standard library imports
+from datetime import datetime
+from typing import Optional, List
+
+# Third-party imports
+from fastapi import FastAPI, Depends, HTTPException
+from sqlmodel import SQLModel, Field, Relationship
+
+# Local imports
+from app.core.config import settings
+from app.models.base import BaseModel
+```
