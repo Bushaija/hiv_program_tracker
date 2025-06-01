@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "hiv_program_tracker"
+    POSTGRES_DB: str = "hiv_tracker_db"
     DATABASE_URL: Optional[PostgresDsn] = None
-    TEST_DATABASE_URL: Optional[str] = None
+    ASYNC_DATABASE_URL: Optional[str] = None
     
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
@@ -70,12 +70,22 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v
         return PostgresDsn.build(
-            scheme="postgresql+asyncpg",
+            scheme="postgresql",
             username=values.get("POSTGRES_USER"),
             password=values.get("POSTGRES_PASSWORD"),
             host=values.get("POSTGRES_SERVER"),
             path=f"/{values.get('POSTGRES_DB') or ''}",
         )
+
+    @validator("ASYNC_DATABASE_URL")
+    def assemble_async_db_connection(cls, v: Optional[str], values: Dict[str, Any]) -> str:
+        if isinstance(v, str):
+            return v
+        db_url = values.get("DATABASE_URL")
+        if not db_url:
+            return None
+        # Replace postgresql:// with postgresql+asyncpg://
+        return str(db_url).replace("postgresql://", "postgresql+asyncpg://")
 
     class Config:
         env_file = ".env"
@@ -90,8 +100,8 @@ settings = Settings()
 # Database URL validation
 def get_database_url() -> str:
     """Get the appropriate database URL based on environment."""
-    if settings.ENVIRONMENT == "testing" and settings.TEST_DATABASE_URL:
-        return settings.TEST_DATABASE_URL
+    if settings.ENVIRONMENT == "testing" and settings.ASYNC_DATABASE_URL:
+        return settings.ASYNC_DATABASE_URL
     return settings.DATABASE_URL
 
 

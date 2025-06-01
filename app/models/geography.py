@@ -1,12 +1,9 @@
 """Geographic models for provinces and districts."""
 
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional
 from sqlmodel import Field, Relationship
 
 from app.models.base import BaseModel
-
-if TYPE_CHECKING:
-    from app.models.facility import Facility
 
 
 class Province(BaseModel, table=True):
@@ -53,9 +50,3 @@ class District(BaseModel, table=True):
 
     # Relationships
     province: Province = Relationship(back_populates="districts")
-    facilities: List["Facility"] = Relationship(back_populates="district")
-
-    class Config:
-        sa_relationship_kwargs = {
-            "facilities": {"cascade": "all, delete-orphan"}
-        }

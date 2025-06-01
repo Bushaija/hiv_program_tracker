@@ -1,0 +1,64 @@
+{
+    "provinces": [
+        {
+            "name": "Kigali City",
+            "code": "KIG",
+            "districts": [
+                {"name": "Gasabo", "code": "GSB"},
+                {"name": "Kicukiro", "code": "KCK"},
+                {"name": "Nyarugenge", "code": "NRG"}
+            ]
+        },
+        {
+            "name": "Eastern Province",
+            "code": "EST",
+            "districts": [
+                {"name": "Bugesera", "code": "BGS"},
+                {"name": "Gatsibo", "code": "GTS"},
+                {"name": "Kayonza", "code": "KYZ"},
+                {"name": "Kirehe", "code": "KRH"},
+                {"name": "Ngoma", "code": "NGM"},
+                {"name": "Nyagatare", "code": "NGT"},
+                {"name": "Rwamagana", "code": "RWM"}
+            ]
+        },
+        {
+            "name": "Northern Province",
+            "code": "NTH",
+            "districts": [
+                {"name": "Burera", "code": "BRR"},
+                {"name": "Gakenke", "code": "GKK"},
+                {"name": "Gicumbi", "code": "GCB"},
+                {"name": "Musanze", "code": "MSZ"},
+                {"name": "Rulindo", "code": "RLD"}
+            ]
+        },
+        {
+            "name": "Southern Province",
+            "code": "STH",
+            "districts": [
+                {"name": "Gisagara", "code": "GSG"},
+                {"name": "Huye", "code": "HUY"},
+                {"name": "Kamonyi", "code": "KMN"},
+                {"name": "Muhanga", "code": "MHG"},
+                {"name": "Nyamagabe", "code": "NMG"},
+                {"name": "Nyanza", "code": "NZA"},
+                {"name": "Nyaruguru", "code": "NRR"},
+                {"name": "Ruhango", "code": "RHG"}
+            ]
+        },
+        {
+            "name": "Western Province",
+            "code": "WST",
+            "districts": [
+                {"name": "Karongi", "code": "KRG"},
+                {"name": "Ngororero", "code": "NGR"},
+                {"name": "Nyabihu", "code": "NBH"},
+                {"name": "Nyamasheke", "code": "NMS"},
+                {"name": "Rubavu", "code": "RBV"},
+                {"name": "Rusizi", "code": "RSZ"},
+                {"name": "Rutsiro", "code": "RTS"}
+            ]
+        }
+    ]
+}
