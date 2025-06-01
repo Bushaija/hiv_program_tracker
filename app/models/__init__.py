@@ -10,6 +10,7 @@ from app.models.program import (
     ActivityType,
 )
 from app.models.associations import FacilityProgram
+from app.models.user import User, UserProfile, PasswordResetToken
 
 __all__ = [
     "SQLModel",
@@ -22,4 +23,7 @@ __all__ = [
     "ActivityCategory",
     "ActivityType",
     "FacilityProgram",
+    "User",
+    "UserProfile",
+    "PasswordResetToken",
 ]
