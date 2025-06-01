@@ -38,7 +38,7 @@ async def seed_data() -> None:
     try:
         # Load data from JSON file
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+                data = json.load(f)
 
         # Create database session
         engine = create_async_engine(str(settings.ASYNC_DATABASE_URL))
